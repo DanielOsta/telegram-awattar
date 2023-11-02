@@ -1,0 +1,7 @@
+services:
+  awattar:
+    image: daniosta/telegram-awattar:v1.0.0
+    container_name: aWATTar
+    restart: unless-stopped
+    environment:
+      - TOKEN=<YOUR-TOKEN>
