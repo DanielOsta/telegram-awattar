@@ -1,19 +1,22 @@
-from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import datetime
 import os
+import pytz
 import requests
 
-netznutzungsentgelt = 5.37 # c / kWh
+netznutzungsentgelt = 5.37  # c / kWh
+beschaffungskomponente = 1.5
 netzverlustentgelt = 0.33
 eletrizitätsabgabe = 0.10
+
 
 async def spot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     marketdata = requests.get('https://api.awattar.at/v1/marketdata').json()['data']
     end_data = []
     new_line = '\n'
     for element in marketdata:
-        start_time = datetime.fromtimestamp(int(element['start_timestamp']) / 1000)
+        start_time = datetime.datetime.fromtimestamp(int(element['start_timestamp']) / 1000)
         price = element['marketprice']
         end_data.append(f'{start_time.strftime("%d-%m-%Y - %H:%M")} - {price}€')
 
@@ -22,32 +25,42 @@ async def spot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                                     f'{new_line.join(map(str, end_data))}')
 
 
-async def kWh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def get_price(num_kwh: int = 1) -> str:
     marketdata = requests.get('https://api.awattar.at/v1/marketdata').json()['data']
     end_data = []
-    new_line = '\n'
+    for element in marketdata:
+        start_time = datetime.datetime.fromtimestamp(int(element['start_timestamp']) / 1000)
+        price_mwh = element['marketprice']
+        # price with calculation in c/kWh
+        price_total = (((price_mwh * 1.03 / 10) +
+                       beschaffungskomponente + netznutzungsentgelt + netzverlustentgelt + eletrizitätsabgabe)
+                       * 1.2 * num_kwh)
+        print(price_total)
+        if price_total > 100:
+            price = f"{round(price_total / 100, 2)}€"
+        else:
+            price = f"{round(price_total, 2)}c"
 
+        end_data.append(f'{start_time.strftime("%d-%m-%Y - %H:%M")} - {price}')
+
+    return '\n'.join(map(str, end_data))
+
+
+async def kwh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message_text = update.message.text.split(' ', 1)
 
     if len(message_text) > 1:
         command, content = message_text
-        if content:
-            num_kwh = int(content)
+        num_kwh = int(content)
     else:
         num_kwh = 1
 
-    for element in marketdata:
-        start_time = datetime.fromtimestamp(int(element['start_timestamp']) / 1000)
-        price_MWh = element['marketprice']
-        price = ((price_MWh / 10) + netznutzungsentgelt + netzverlustentgelt + eletrizitätsabgabe) * 1.2
-        end_data.append(f'{start_time.strftime("%d-%m-%Y - %H:%M")} - {round(price * num_kwh, 2)}c')
-
     await update.message.reply_text(f'Hallo {update.effective_user.first_name}!\n'
-                                    f'Hier der Preis pro kWh für Heute:\n\n'
-                                    f'{new_line.join(map(str, end_data))}')
+                                    f'Hier der Preis für {num_kwh} kWh Heute:\n{get_price(num_kwh)}')
 
 
 async def set_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global beschaffungskomponente
     global netznutzungsentgelt
     global netzverlustentgelt
     global eletrizitätsabgabe
@@ -58,6 +71,8 @@ async def set_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         match variable.lower():
             case "netznutzungsentgelt":
                 netznutzungsentgelt = float(value)
+            case "beschaffungskomponente":
+                beschaffungskomponente = float(value)
             case "netzverlustentgelt":
                 netzverlustentgelt = float(value)
             case "eletrizitätsabgabe":
@@ -67,14 +82,24 @@ async def set_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f'Not possible')
 
 
+async def get_daily_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_message.chat_id
+    text = "Timer started!"
+    tz = pytz.timezone('Europe/Vienna')
+    context.job_queue.run_daily(kwh, time=datetime.time(14, 5, tzinfo=tz), chat_id=chat_id)
+    await update.effective_message.reply_text(text)
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /help is issued."""
     help_text = "Available commands:\n"
     help_text += "/spot - Get current Spot-Prices from aWATTar\n"
     help_text += "/kWh [num] - Get the price per kWh. If 'num' is set, multiple the values with 'num'.\n"
+    help_text += "/daily - Get the price per kWh daily at 14:05.\n"
     help_text += "/set_value [name] [value] - Set [name] to [value].\n"
     help_text += "/help - Display this help message"
     help_text += ("\n\nInfo - Netzkosten Nettopreis:\n"
+                  f"Beschaffungskomponente: {beschaffungskomponente}c/kWh\n"
                   f"Netznutzungsentgelt: {netznutzungsentgelt}c/kWh\n"
                   f"Netzverlustentgelt: {netzverlustentgelt}c/kWh\n"
                   f"Elektrizitätsabgabe: {eletrizitätsabgabe}c/kWh\n")
@@ -89,9 +114,10 @@ if not bot_token:
 app = ApplicationBuilder().token(bot_token).build()
 
 app.add_handler(CommandHandler("spot", spot))
-app.add_handler(CommandHandler("kWh", kWh))
+app.add_handler(CommandHandler("kWh", kwh))
 app.add_handler(CommandHandler("set_value", set_value))
 app.add_handler(CommandHandler("help", help_command))
+app.add_handler(CommandHandler("daily", get_daily_messages))
 
 print("Application started - waiting for messages!")
 
