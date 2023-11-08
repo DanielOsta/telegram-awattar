@@ -6,8 +6,6 @@ from telegram.ext import ContextTypes
 def remove_job_if_exists(name: str, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Remove job with given name. Returns whether job was removed."""
     current_jobs = context.job_queue.get_jobs_by_name(name)
-    print(current_jobs)
-    print(name)
     if not current_jobs:
         return False
     for job in current_jobs:
@@ -26,7 +24,7 @@ async def start_timer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     text = "Timer started!"
     if remove_job_if_exists(str(chat_id), context):
         text += " Old one was removed."
-    context.job_queue.run_repeating(send_message, 10, chat_id=chat_id, data="test")
+    context.job_queue.run_repeating(send_message, 10, chat_id=chat_id, data="test", name=str(chat_id))
     await update.effective_message.reply_text(text)
 
 

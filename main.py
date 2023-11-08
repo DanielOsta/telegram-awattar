@@ -33,9 +33,8 @@ def get_price(num_kwh: int = 1) -> str:
         price_mwh = element['marketprice']
         # price with calculation in c/kWh
         price_total = (((price_mwh * 1.03 / 10) +
-                       beschaffungskomponente + netznutzungsentgelt + netzverlustentgelt + eletrizitätsabgabe)
+                        beschaffungskomponente + netznutzungsentgelt + netzverlustentgelt + eletrizitätsabgabe)
                        * 1.2 * num_kwh)
-        print(price_total)
         if price_total > 100:
             price = f"{round(price_total / 100, 2)}€"
         else:
@@ -54,7 +53,6 @@ async def kwh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         num_kwh = int(content)
     else:
         num_kwh = 1
-
     await update.message.reply_text(f'Hallo {update.effective_user.first_name}!\n'
                                     f'Hier der Preis für {num_kwh} kWh Heute:\n{get_price(num_kwh)}')
 
@@ -82,11 +80,39 @@ async def set_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f'Not possible')
 
 
+async def daily_message(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send the alarm message."""
+    job = context.job
+    await context.bot.send_message(job.chat_id,
+                                   text=f'Hallo hier der Preis für die nächsten 24 Stunden!\n'
+                                   f'Hier der kWh Preis für Heute:\n{get_price(1)}')
+
+
+def remove_job_if_exists(chat_id: str, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Remove job with given name. Returns whether job was removed."""
+    current_jobs = context.job_queue.get_jobs_by_name(chat_id)
+    if not current_jobs:
+        return False
+    for job in current_jobs:
+        job.schedule_removal()
+    return True
+
+
+async def stop_daily_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_message.chat_id
+    job_removed = remove_job_if_exists(str(chat_id), context)
+    text = "Timer successfully cancelled!" if job_removed else "You have no active timer."
+    await update.message.reply_text(text)
+
+
 async def get_daily_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_message.chat_id
-    text = "Timer started!"
+    text = "Timer started. The bot will send a message every day at 14:05!"
+    if remove_job_if_exists(str(chat_id), context):
+        text += "\nAnd the previous job was removed!"
     tz = pytz.timezone('Europe/Vienna')
-    context.job_queue.run_daily(kwh, time=datetime.time(14, 5, tzinfo=tz), chat_id=chat_id)
+    context.job_queue\
+        .run_daily(daily_message, time=datetime.time(14, 5, tzinfo=tz), chat_id=chat_id, name=str(chat_id))
     await update.effective_message.reply_text(text)
 
 
@@ -96,6 +122,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     help_text += "/spot - Get current Spot-Prices from aWATTar\n"
     help_text += "/kWh [num] - Get the price per kWh. If 'num' is set, multiple the values with 'num'.\n"
     help_text += "/daily - Get the price per kWh daily at 14:05.\n"
+    help_text += "/stop - Stop getting the daily price.\n"
     help_text += "/set_value [name] [value] - Set [name] to [value].\n"
     help_text += "/help - Display this help message"
     help_text += ("\n\nInfo - Netzkosten Nettopreis:\n"
@@ -118,6 +145,7 @@ app.add_handler(CommandHandler("kWh", kwh))
 app.add_handler(CommandHandler("set_value", set_value))
 app.add_handler(CommandHandler("help", help_command))
 app.add_handler(CommandHandler("daily", get_daily_messages))
+app.add_handler(CommandHandler("stop", stop_daily_messages))
 
 print("Application started - waiting for messages!")
 
