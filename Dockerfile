@@ -16,9 +16,11 @@ FROM alpine:latest
 
 ARG APP_DIR=/app
 ENV PATH="/opt/venv/bin:$PATH"
+ENV TZ=Europe/Vienna
 
 RUN apk add --update \
-      python3 && \
+      python3 \
+      tzdata && \
       rm -rf /var/cache/apk/*
 
 COPY --from=builder /opt/venv /opt/venv
